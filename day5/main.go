@@ -1,35 +1,28 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
 	"log"
 	"os"
-	"regexp"
-	"strconv"
-	"strings"
+
+	"github.com/alecthomas/participle/v2"
 )
 
+type Almanac struct {
+	Seeds []int `"seeds" ":" @Int*`
+	Maps  []Map `@@+`
+}
+
 type Map struct {
-	Source      string
-	Destination string
-	Ranges      []Range
+	Source      string  `@Ident "-" "to" "-"`
+	Destination string  `@Ident "map" ":"`
+	Ranges      []Range `@@+`
 }
 
 type Range struct {
-	Destination int
-	Source      int
-	Length      int
+	Destination int `@Int`
+	Source      int `@Int`
+	Length      int `@Int`
 }
-
-const (
-	soilToFertilizer      = "soil-to-fertilizer"
-	fertilizerToWater     = "fertilizer-to-water"
-	waterToLight          = "water-to-light"
-	lightToTemperature    = "light-to-temperature"
-	temperatureToHumidity = "temperature-to-humidity"
-	humidityToLocation    = "humidity-to-location"
-)
 
 func main() {
 	low := LowestLocationNumber("input1.txt", false)
@@ -40,8 +33,10 @@ func main() {
 }
 
 func LowestLocationNumber(filename string, pairs bool) int {
+	seeds, maps := parse(filename)
+	locs := lowestLocation(seeds, maps, pairs)
+
 	low := -1
-	locs := parse(filename, pairs)
 	for _, v := range locs {
 		if low == -1 || v < low {
 			low = v
@@ -51,40 +46,21 @@ func LowestLocationNumber(filename string, pairs bool) int {
 	return low
 }
 
-func parse(filename string, pairs bool) []int {
-	fh, err := os.Open(filename)
-	if err != nil {
-		log.Fatal("unable to open file: %w", err)
-	}
-
-	var lines []string
-	scanner := bufio.NewScanner(fh)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal("scanner error: %w", err)
-	}
-
-	lines = mergeLines(lines)
-	seeds, maps := parseLines(lines)
-	print(seeds, maps)
-
+func lowestLocation(seeds []int, maps map[string]Map, pairs bool) []int {
 	var locs []int
 	min := -1
 
 	switch pairs {
 	case true:
 		i := 0
-		for i < len(seeds) / 2 {
+		for i < len(seeds)/2 {
 			start := seeds[i*2]
 			length := seeds[i*2+1]
 
 			log.Println("Checking Pairs:", start, length)
 
 			for j := 0; j < length; j++ {
-				loc := location(maps, start + j)
+				loc := location(maps, start+j)
 				if loc < min || min == -1 {
 					min = loc
 				}
@@ -142,123 +118,28 @@ func location(maps map[string]Map, seed int) int {
 	return num
 }
 
-func mergeLines(lines []string) []string {
-	var section string
-	var value string
-	var sections []string
-
-	for _, line := range lines {
-		if line == "" {
-			if value == "" {
-				sections = append(sections, section)
-				section = ""
-				continue
-			}
-			sections = append(sections, fmt.Sprintf("%s: %s", section, value))
-			section = ""
-			value = ""
-			continue
-		}
-
-		if strings.HasPrefix(line, "seeds:") {
-			section = line
-			continue
-		}
-
-		re := regexp.MustCompile(`[a-zA-Z-]+`)
-		res := re.FindString(line)
-		if res != "" {
-			section = res
-			continue
-		}
-
-		if value == "" {
-			value = line
-			continue
-		}
-
-		value = fmt.Sprintf("%s, %s", value, line)
+func parse(filemame string) ([]int, map[string]Map) {
+	file, err := os.ReadFile(filemame)
+	if err != nil {
+		log.Fatal("unable to read file: %w", err)
 	}
 
-	sections = append(sections, fmt.Sprintf("%s: %s", section, value))
+	input := string(file)
 
-	return sections
-}
-
-func parseLines(lines []string) ([]int, map[string]Map) {
-	seeds := parseSeeds(lines[0])
-	maps := parseMaps(lines[1:])
-
-	return seeds, maps
-}
-
-func parseSeeds(txt string) []int {
-	matches := strings.SplitN(txt, ":", 2)
-
-	return toInt(matches[1])
-}
-
-func parseMaps(lines []string) map[string]Map {
-	maps := make(map[string]Map)
-
-	for _, line := range lines {
-		matches := strings.FieldsFunc(line, split)
-
-		name := matches[0]
-		values := matches[1:]
-
-		srcDest := strings.Split(name, "-to-")
-
-		var rs []Range
-		for _, v := range values {
-			arr := toInt(v)
-
-			rs = append(rs, Range{
-				Destination: arr[0],
-				Source:      arr[1],
-				Length:      arr[2],
-			})
-		}
-
-		maps[srcDest[0]] = Map{
-			Source:      srcDest[0],
-			Destination: srcDest[1],
-			Ranges:      rs,
-		}
+	parser, err := participle.Build[Almanac]()
+	if err != nil {
+		log.Fatal("unable to build parser: %w", err)
 	}
 
-	return maps
-}
-
-func toInt(txt string) []int {
-	arr := strings.Fields(txt)
-	s := make([]int, len(arr))
-
-	for idx, v := range arr {
-		num, err := strconv.Atoi(v)
-		if err != nil {
-			log.Fatal("unable to convert to int: %w", err)
-		}
-		s[idx] = num
+	almanac, err := parser.ParseString("", input)
+	if err != nil {
+		log.Fatal("unable to parse almanac: %w", err)
 	}
 
-	return s
-}
-
-func split(r rune) bool {
-	return r == ':' || r == ','
-}
-
-func print(seeds []int, maps map[string]Map) {
-	log.Println("Seeds:", seeds)
-	log.Println()
-
-	for _, v := range maps {
-		log.Println("Source", v.Source)
-		log.Println("Destination:", v.Destination)
-		for _, vv := range v.Ranges {
-			log.Println(fmt.Sprintf("Src: %d Dest: %d Len: %d", vv.Source, vv.Destination, vv.Length))
-		}
-		log.Println()
+	maps := make(map[string]Map, len(almanac.Maps))
+	for _, v := range almanac.Maps {
+		maps[v.Source] = v
 	}
+
+	return almanac.Seeds, maps
 }
