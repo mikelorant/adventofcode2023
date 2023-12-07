@@ -1,20 +1,26 @@
 package main
 
 import (
-	"bufio"
 	"log"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/alecthomas/participle/v2"
+	"github.com/alecthomas/participle/v2/lexer"
 )
+
+type Data struct {
+	Hands Hands `@@*`
+}
 
 type Hands []Hand
 
 type Hand struct {
-	RawCards string
+	RawCards string `@Card`
 	Cards    map[string]int
-	Bid      int
+	Bid      int `@Int`
 	Type     Type
 	Strength []int
 	Joker    bool
@@ -313,29 +319,33 @@ func isFiveKind(c Cards, j int) bool {
 func parse(filename string, joker bool) Hands {
 	var hands Hands
 
+	handLexer := lexer.MustSimple([]lexer.SimpleRule{
+		{"Card", `\w{5}`},
+		{"Int", `\d+`},
+		{"whitespace", `\s+`},
+	})
+
 	fh, err := os.Open(filename)
 	if err != nil {
 		log.Fatal("unable to read file: %w", err)
 	}
 
-	scanner := bufio.NewScanner(fh)
-	for scanner.Scan() {
-		arr := strings.Fields(scanner.Text())
-		hand := Hand{
-			Cards:    make(map[string]int),
-			RawCards: arr[0],
-			Bid:      toInt(arr[1]),
-			Joker:    joker,
-		}
+	parser := participle.MustBuild[Data](
+		participle.Lexer(handLexer),
+	)
+	data, err := parser.Parse(filename, fh)
+	if err != nil {
+		log.Fatal("unable to parse paper: %w", err)
+	}
+
+	for _, hand := range data.Hands {
+		hand.Cards = make(map[string]int)
+		hand.Joker = joker
 		hand.Check()
 		hand.Result()
 		hand.Score()
 
 		hands = append(hands, hand)
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Fatal("scanner error: %w", err)
 	}
 
 	return hands
